@@ -88,6 +88,7 @@ class GroupPermissionsForm extends BasePermissionForm {
    * {@inheritdoc}
    */
   public function buildForm(array $form, FormStateInterface $form_state, Group $group = NULL) {
+    $templates = $this->_load_templates(false);
     $this->group = $group;
 
     $role_info = [];
@@ -108,6 +109,15 @@ class GroupPermissionsForm extends BasePermissionForm {
       ],
       '#default_value' => empty($this->groupPermission) ? self::USE_DEFAULT : self::OVERRIDE,
     ];
+
+    $form['permissions_template'] = [
+      '#type' => 'select',
+      '#title' => $this->t('Apply a predefined template.'),
+      '#options' => $templates,
+      '#empty_value' => '',
+      '#default_value' => ''
+    ];
+
 
     // Sort the group roles using the static sort() method.
     // See \Drupal\Core\Config\Entity\ConfigEntityBase::sort().
@@ -272,6 +282,12 @@ class GroupPermissionsForm extends BasePermissionForm {
       }
     }
 
+    $form['permissions_template_name'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Template name'),
+      '#description' => t('Enter a name if you want to save this as template. Left this field empty for no action.')
+    ];
+
     $form['actions'] = ['#type' => 'actions'];
     $form['actions']['submit'] = [
       '#type' => 'submit',
@@ -316,6 +332,16 @@ class GroupPermissionsForm extends BasePermissionForm {
         /** @var \Drupal\group\Entity\GroupRoleInterface $group_role */
         $permissions[$role_name] = array_keys(array_filter($form_state->getValue($role_name)));
       }
+
+      // Is a template selected?
+      $template = $form_state->getValue('permissions_template');
+
+      if(isset($template) && !empty($template)) {
+        $permissions = $this->_load_template($template);
+      }
+
+      $template_name = $form_state->getValue('permissions_template_name');
+      $this->_save_template($template_name, $permissions);
 
       if (!empty($this->groupPermission)) {
         $this->groupPermission->setPermissions($permissions);
@@ -385,4 +411,32 @@ class GroupPermissionsForm extends BasePermissionForm {
     return array_merge($roles, $outsider_roles);
   }
 
+  private function _load_templates($deep = true) {
+    $config = \Drupal::config('fut_group_permissions.templates');
+    $permissions = $config->get('permissions');
+    $templates = unserialize($permissions);
+    $templates = is_array($templates) ? $templates : [];
+    if(!$deep) {
+      array_walk($templates, function(&$a, $b) { $a = "$b"; });
+    }
+    return $templates;
+  }
+
+  private function _load_template($name) {
+    $templates = $this->_load_templates();
+    return is_array($templates[$name]) ? $templates[$name] : [];
+  }
+
+  private function _save_template($name, $permissions) {
+    if (empty($name)) {
+      return;
+    }
+    $config = \Drupal::service('config.factory')->getEditable('fut_group_permissions.templates');
+    $current = $config->get('permissions');
+    $new = unserialize($current);
+    $new[$name] = $permissions;
+    $serialized = serialize($new);
+    $config->set('permissions', $serialized);
+    $config->save();
+  }
 }
